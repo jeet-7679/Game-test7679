@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlagsBattle — Full Game</title>
+<style>
+:root{--bg:#070910;--panel:#111522;--line:#283149;--text:#f5f7ff;--muted:#8994ad;--blue:#4b8dff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#141b2e,#070910 55%);color:var(--text);font-family:Inter,Arial,sans-serif;overflow:hidden}
+header{height:68px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:#0d111cdd;border-bottom:1px solid var(--line);backdrop-filter:blur(10px)}
+.brand{display:flex;align-items:center;gap:10px}.brand b{font-size:22px}.brand span{font-size:11px;color:var(--muted)}
+.actions{display:flex;gap:8px}button,select{border:1px solid #34405b;background:#171e2d;color:#fff;border-radius:9px;padding:10px 13px;font-weight:700;cursor:pointer}button.primary{background:var(--blue);border-color:var(--blue)}
+main{height:calc(100vh - 68px);display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:12px;padding:12px}
+.game{position:relative;min-width:0;min-height:0;border:1px solid var(--line);border-radius:15px;overflow:hidden;background:#05070d}
+canvas{width:100%;height:100%;display:block}
+.hud{position:absolute;left:12px;right:12px;top:12px;display:flex;justify-content:space-between;pointer-events:none}
+.badge{background:#0c1220dd;border:1px solid #303b55;border-radius:9px;padding:7px 10px;font-size:12px}
+aside{background:#101522;border:1px solid var(--line);border-radius:15px;padding:14px;overflow:auto}
+h2{font-size:15px;margin:0 0 12px}.section{margin-bottom:17px}.row{display:flex;align-items:center;gap:8px;padding:8px;border-radius:9px;background:#0a0e17;margin:6px 0}.flag{font-size:25px}.nm{flex:1;font-size:13px}.score{font-weight:800;color:#7facff}.bar{height:4px;background:#1d2638;border-radius:8px;margin-top:4px;overflow:hidden}.fill{height:100%;background:#4b8dff}.small{font-size:11px;color:var(--muted);line-height:1.5}.controls{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.overlay{position:absolute;inset:0;background:#02040bcc;display:none;align-items:center;justify-content:center;z-index:5}.card{width:min(390px,90%);background:#111827;border:1px solid #3a4661;border-radius:18px;padding:28px;text-align:center;box-shadow:0 20px 80px #000}.champ{font-size:64px}.winner{font-size:28px;font-weight:900}.result{color:var(--muted);margin:8px 0 20px}
+.toast{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);background:#111827eF;border:1px solid #34405b;padding:9px 14px;border-radius:9px;font-size:12px;display:none}
+@media(max-width:800px){body{overflow:auto}main{height:auto;grid-template-columns:1fr}.game{height:64vh}aside{height:360px}}
+</style>
+</head>
+<body>
+<header>
+<div class="brand"><div>🏳️</div><div><b>FlagsBattle</b><br><span>FULL GAME • V1</span></div></div>
+<div class="actions"><select id="mode"><option value="classic">Classic</option><option value="speed">Speed Battle</option><option value="chaos">Chaos</option></select><button class="primary" id="new">New Battle</button></div>
+</header>
+<main>
+<section class="game" id="game">
+<canvas id="canvas"></canvas>
+<div class="hud"><div class="badge" id="status">Loading…</div><div class="badge" id="timer">00:00</div></div>
+<div class="toast" id="toast"></div>
+<div class="overlay" id="overlay"><div class="card"><div class="champ" id="winFlag">🏆</div><div class="winner" id="winName">Winner</div><div class="result" id="winText"></div><button class="primary" id="again">Battle Again</button></div></div>
+</section>
+<aside>
+<div class="section"><h2>🏆 Live Scoreboard</h2><div id="scores"></div></div>
+<div class="section"><h2>🎮 How to Play</h2><div class="small">Tap/click a flag to support it. Every support gives the flag a small speed boost. Flags collide and bounce around the arena. The last surviving flag wins.</div></div>
+<div class="section"><h2>⚙️ Battle Info</h2><div class="small" id="info"></div></div>
+<div class="section"><h2>🧪 Game Controls</h2><div class="controls"><button id="pause">Pause</button><button id="resetScores">Reset Score</button></div></div>
+<div class="section"><div class="small">YouTube Live-ready architecture: support events can later be received from a Node.js/WebSocket backend.</div></div>
+</aside>
+</main>
+<script>
+const teams=[["🇮🇳","India"],["🇧🇷","Brazil"],["🇯🇵","Japan"],["🇺🇸","USA"],["🇩🇪","Germany"],["🇫🇷","France"],["🇬🇧","UK"],["🇮🇹","Italy"],["🇦🇺","Australia"],["🇰🇷","South Korea"]];
+const cvs=document.getElementById("canvas"),ctx=cvs.getContext("2d"),box=document.getElementById("game");
+let W=0,H=0,dpr=1,border=35,balls=[],scores={},running=false,paused=false,last=0,start=0,mode="classic",raf=0,events=0;
+
+function resize(){dpr=devicePixelRatio||1;W=box.clientWidth;H=box.clientHeight;cvs.width=W*dpr;cvs.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);border=Math.max(28,Math.min(46,W*.045))}
+function reset(){
+ cancelAnimationFrame(raf);mode=document.getElementById("mode").value;scores={};events=0;paused=false;
+ const count=mode==="chaos"?10:8;balls=[];const cx=W/2,cy=H/2,R=Math.min(W,H)*.28;
+ for(let i=0;i<count;i++){let t=teams[i],a=i*Math.PI*2/count;
+  scores[t[1]]=0;balls.push({flag:t[0],name:t[1],x:cx+Math.cos(a)*R,y:cy+Math.sin(a)*R,r:mode==="chaos"?27:30,vx:(Math.random()-.5)*(mode==="speed"?260:180),vy:(Math.random()-.5)*(mode==="speed"?260:180),hp:100})
+ }
+ document.getElementById("overlay").style.display="none";start=performance.now();last=start;running=true;updateUI();raf=requestAnimationFrame(loop)
+}
+function support(b){scores[b.name]=(scores[b.name]||0)+1;events++;const boost=mode==="chaos"?55:40;b.vx+=(Math.random()-.5)*boost;b.vy+=(Math.random()-.5)*boost;b.hp=Math.min(100,b.hp+3);toast(`${b.flag} ${b.name} +1 support`);updateUI()}
+function toast(s){let e=document.getElementById("toast");e.textContent=s;e.style.display="block";clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display="none",700)}
+function collide(a,b){let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,min=a.r+b.r;if(d<min){let nx=dx/d,ny=dy/d,ov=min-d;a.x-=nx*ov/2;a.y-=ny*ov/2;b.x+=nx*ov/2;b.y+=ny*ov/2;let rvx=b.vx-a.vx,rvy=b.vy-a.vy,rel=rvx*nx+rvy*ny;if(rel<0)return;a.vx+=nx*rel;a.vy+=ny*rel;b.vx-=nx*rel;b.vy-=ny*rel}}
+function loop(now){if(!running)return;if(!paused){let dt=Math.min(.035,(now-last)/1000);last=now;
+ for(const b of balls){b.x+=b.vx*dt;b.y+=b.vy*dt;b.vx*=mode==="speed"?.998:.999;b.vy*=mode==="speed"?.998:.999;
+  if(b.x-b.r<border){b.x=border+b.r;b.vx=Math.abs(b.vx)}if(b.x+b.r>W-border){b.x=W-border-b.r;b.vx=-Math.abs(b.vx)}
+  if(b.y-b.r<border){b.y=border+b.r;b.vy=Math.abs(b.vy)}if(b.y+b.r>H-border){b.y=H-border-b.r;b.vy=-Math.abs(b.vy)}
+ }
+ for(let i=0;i<balls.length;i++)for(let j=i+1;j<balls.length;j++)collide(balls[i],balls[j]);
+ // occasional elimination creates a knockout feel
+ if(mode==="chaos" && balls.length>2 && Math.random()<dt*.055){let idx=Math.floor(Math.random()*balls.length);let out=balls.splice(idx,1)[0];toast(`${out.flag} ${out.name} eliminated!`)}
+ }
+ draw();updateUI();
+ if(balls.length<=1){finish();return}raf=requestAnimationFrame(loop)}
+function finish(){running=false;const b=balls[0];document.getElementById("winFlag").textContent=b?b.flag:"🏆";document.getElementById("winName").textContent=b?`${b.name} wins!`:"Battle ended";document.getElementById("winText").textContent=`${events} total support events • Mode: ${mode}`;document.getElementById("overlay").style.display="flex"}
+function draw(){ctx.clearRect(0,0,W,H);ctx.fillStyle="#05070d";ctx.fillRect(0,0,W,H);
+ ctx.strokeStyle="#2c3750";ctx.lineWidth=4;ctx.strokeRect(border,border,W-border*2,H-border*2);
+ for(const b of balls){ctx.beginPath();ctx.arc(b.x,b.y,b.r+5,0,Math.PI*2);ctx.fillStyle="#0b1120";ctx.fill();ctx.font=`${b.r*1.45}px serif`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(b.flag,b.x,b.y);
+ ctx.font="bold 11px Arial";ctx.fillStyle="#fff";ctx.fillText(scores[b.name]||0,b.x,b.y+b.r+15)}
+}
+function updateUI(){document.getElementById("status").textContent=`${balls.length} flags • ${mode.toUpperCase()} • ${paused?"PAUSED":"LIVE"}`;
+ let sec=Math.floor((performance.now()-start)/1000),m=String(Math.floor(sec/60)).padStart(2,"0"),s=String(sec%60).padStart(2,"0");document.getElementById("timer").textContent=`${m}:${s}`;
+ const sorted=balls.slice().sort((a,b)=>(scores[b.name]||0)-(scores[a.name]||0));document.getElementById("scores").innerHTML=sorted.map(b=>{let max=Math.max(1,...Object.values(scores));return `<div class="row"><span class="flag">${b.flag}</span><span class="nm">${b.name}<div class="bar"><div class="fill" style="width:${((scores[b.name]||0)/max)*100}%"></div></div></span><span class="score">${scores[b.name]||0}</span></div>`}).join("");
+document.getElementById("info").innerHTML=`Mode: <b>${mode}</b><br>Flags: ${balls.length}<br>Support events: ${events}<br>Click/tap flags to support`;
+}
+cvs.addEventListener("pointerdown",e=>{if(!running||paused)return;let r=cvs.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;for(const b of balls)if(Math.hypot(x-b.x,y-b.y)<b.r+15){support(b);break}});
+document.getElementById("new").onclick=reset;document.getElementById("again").onclick=reset;
+document.getElementById("pause").onclick=()=>{paused=!paused;document.getElementById("pause").textContent=paused?"Resume":"Pause";last=performance.now();updateUI()};
+document.getElementById("resetScores").onclick=()=>{for(const k in scores)scores[k]=0;events=0;updateUI();toast("Scores reset")};
+document.getElementById("mode").onchange=reset;window.addEventListener("resize",()=>{resize();if(!running)draw()});resize();reset();
+</script>
+</body></html>
